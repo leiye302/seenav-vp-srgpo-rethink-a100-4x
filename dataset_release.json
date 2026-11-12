@@ -1,0 +1,168 @@
+{
+  "schema": "seenav_route_sft_github_release_v1",
+  "repository": "leiye302/seenav-vp-srgpo-opsd-a100-4x",
+  "assets": [
+    {
+      "name": "seenav-route-sft-reviewed-v2-metadata.zip",
+      "path": "seenav-route-sft-reviewed-v2-metadata.zip",
+      "sha256": "8b2b0eee736e81d7de4c41277315e58d11f9bae18622d8ef216c8cf7f9dfa2e7",
+      "size": 2373561,
+      "kind": "metadata"
+    },
+    {
+      "name": "seenav-route-sft-reviewed-v2-media-01.zip",
+      "path": "media/seenav-route-sft-reviewed-v2-media-01.zip",
+      "sha256": "0237e4d72b84a81f36bb62c61fe2f2dc57a8fb52b0abeca6ad4ff6953fbe7e27",
+      "size": 201010969,
+      "kind": "media"
+    },
+    {
+      "name": "seenav-route-sft-reviewed-v2-media-02.zip",
+      "path": "media/seenav-route-sft-reviewed-v2-media-02.zip",
+      "sha256": "af478e6ff6af3ad06b7835217b6feb77d809f1abfd66fd273387e3530216fe89",
+      "size": 201298034,
+      "kind": "media"
+    },
+    {
+      "name": "seenav-route-sft-reviewed-v2-media-03.zip",
+      "path": "media/seenav-route-sft-reviewed-v2-media-03.zip",
+      "sha256": "17d2ac645ecde4ebf584f8d10be7083b53a81dde9bbb08d6e1733301127c7c99",
+      "size": 201227048,
+      "kind": "media"
+    },
+    {
+      "name": "seenav-route-sft-reviewed-v2-media-04.zip",
+      "path": "media/seenav-route-sft-reviewed-v2-media-04.zip",
+      "sha256": "58321b5a8bea9d3a48a275830e8486b9d98874a8f73e21adb2d8feec1095a008",
+      "size": 200940950,
+      "kind": "media"
+    },
+    {
+      "name": "seenav-route-sft-reviewed-v2-media-05.zip",
+      "path": "media/seenav-route-sft-reviewed-v2-media-05.zip",
+      "sha256": "328dd2a72f1c552e55bb127cde998148c695a2c94eca5831b9f24d1b1b513702",
+      "size": 201293621,
+      "kind": "media"
+    },
+    {
+      "name": "seenav-route-sft-reviewed-v2-media-06.zip",
+      "path": "media/seenav-route-sft-reviewed-v2-media-06.zip",
+      "sha256": "09b16ba5eefc532e0102072e56e415d1f590fd41925bf240d2ebdcd22020c4b2",
+      "size": 201397347,
+      "kind": "media"
+    },
+    {
+      "name": "seenav-route-sft-reviewed-v2-media-07.zip",
+      "path": "media/seenav-route-sft-reviewed-v2-media-07.zip",
+      "sha256": "d026ab41db3a9447fed27170486771e6c0bcfa135d7bc86a5102cdcec001c6f6",
+      "size": 200962953,
+      "kind": "media"
+    },
+    {
+      "name": "seenav-route-sft-reviewed-v2-media-08.zip",
+      "path": "media/seenav-route-sft-reviewed-v2-media-08.zip",
+      "sha256": "1b816697e14fe837f4faa20b036c0970820f754a99d8f688c7965c7c356af52e",
+      "size": 200938184,
+      "kind": "media"
+    },
+    {
+      "name": "seenav-route-sft-reviewed-v2-media-09.zip",
+      "path": "media/seenav-route-sft-reviewed-v2-media-09.zip",
+      "sha256": "c190d7ff4e35ce08164d4cd21846e7e856d21bb2a2f0a383caa418aac8ec0044",
+      "size": 201032342,
+      "kind": "media"
+    },
+    {
+      "name": "seenav-route-sft-reviewed-v2-media-10.zip",
+      "path": "media/seenav-route-sft-reviewed-v2-media-10.zip",
+      "sha256": "bbd0dc453e5a354a9acee5c55806d547962c8a72af6fa71c60f5ea4d14cfaf29",
+      "size": 201306600,
+      "kind": "media"
+    },
+    {
+      "name": "seenav-route-sft-reviewed-v2-media-11.zip",
+      "path": "media/seenav-route-sft-reviewed-v2-media-11.zip",
+      "sha256": "dc6b8394b2a02baae8ceb4f312f64a5a81caa03ec3b9e0ab4cb3120e869a85e6",
+      "size": 201058652,
+      "kind": "media"
+    },
+    {
+      "name": "seenav-route-sft-reviewed-v2-media-12.zip",
+      "path": "media/seenav-route-sft-reviewed-v2-media-12.zip",
+      "sha256": "d0e1ebabf799fdb3675d8f2c296f760eb96ec73a6d317ccf70dde16e4a8c4975",
+      "size": 201034831,
+      "kind": "media"
+    },
+    {
+      "name": "seenav-route-sft-reviewed-v2-media-13.zip",
+      "path": "media/seenav-route-sft-reviewed-v2-media-13.zip",
+      "sha256": "0dc9617b901091111d01e128d29edf724f9952bd9cabd2cc09aae2ec0dc38f2e",
+      "size": 200859986,
+      "kind": "media"
+    },
+    {
+      "name": "seenav-route-sft-reviewed-v2-media-14.zip",
+      "path": "media/seenav-route-sft-reviewed-v2-media-14.zip",
+      "sha256": "1028eb1f288ee59d048ea04fb884dbf9f3bc733cce789fdf54c565de3dd82798",
+      "size": 58491840,
+      "kind": "media"
+    }
+  ],
+  "manifest_sha256": "c4b60bf582bfb826280bf3c99eba8c380d560d35d47a55cb1e8fa792e7984574",
+  "splits": {
+    "train": {
+      "batches": 736,
+      "episodes": 486,
+      "max_total_tokens": 2268,
+      "routes": {
+        "bad": 2208,
+        "good": 3680
+      },
+      "rows": 5888,
+      "scenes": 50,
+      "source_lanes": {
+        "bad_archive_final": 1646,
+        "bad_archive_start": 8,
+        "bad_archive_supplement": 187,
+        "bad_reviewed_replay_context": 342,
+        "bad_reviewed_replay_start": 25,
+        "good_archive": 3680
+      },
+      "target_actions": {
+        "0": 3033,
+        "1": 899,
+        "2": 676,
+        "3": 784,
+        "4": 332,
+        "5": 164
+      }
+    },
+    "validation": {
+      "batches": 16,
+      "episodes": 12,
+      "max_total_tokens": 2183,
+      "routes": {
+        "bad": 48,
+        "good": 80
+      },
+      "rows": 128,
+      "scenes": 3,
+      "source_lanes": {
+        "bad_archive_final": 36,
+        "bad_archive_supplement": 5,
+        "bad_reviewed_replay_context": 7,
+        "good_archive": 80
+      },
+      "target_actions": {
+        "0": 58,
+        "1": 28,
+        "2": 10,
+        "3": 16,
+        "4": 14,
+        "5": 2
+      }
+    }
+  },
+  "tag": "seenav-route-sft-reviewed-v2",
+  "unique_frames": 4968
+}

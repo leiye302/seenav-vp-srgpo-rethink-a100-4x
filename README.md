@@ -3,7 +3,12 @@
 在作者公开的 **EmbodiedBench-Navigation / VP + SRGPO** 训练上，仅接入 Teacher-only OPSD。使用
 [SeeNav-Agent 论文 v2](https://arxiv.org/pdf/2512.02631v2) 和
 [作者代码 7ed6a59](https://github.com/WzcTHU/SeeNav-Agent/tree/7ed6a59052701951bdb2c7d51dd6d9103219cf3e)。
-这是对照实验的复现仓库，不是作者发布，也不包含权重、数据副本或训练结果。
+这是对照实验的复现仓库，不是作者发布。Git 提交不包含权重或大数据文件。
+
+从本基线派生的 **SeeNav RETHINK** 有单独的入口和工作目录。它使用
+`<think>…</think><RETHINK><action>…</action>`，包含 [Route-SFT 与局部 hint 的说明和运行命令](METHOD.md)。
+一阶段使用[复审后的数据集与下载说明](DATASET.md)。图像与样本文件在 GitHub Release 中，克隆代码不下载大文件。
+下面原有的 JSON 基线命令不变。
 
 ## 改动范围
 

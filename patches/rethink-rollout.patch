@@ -1,0 +1,17 @@
+diff --git a/verl-agent/agent_system/multi_turn_rollout/rollout_loop.py b/verl-agent/agent_system/multi_turn_rollout/rollout_loop.py
+--- a/verl-agent/agent_system/multi_turn_rollout/rollout_loop.py
++++ b/verl-agent/agent_system/multi_turn_rollout/rollout_loop.py
+@@ -360 +360,6 @@
++            actor_config = self.config.actor_rollout_ref.actor
++            tags = actor_config.output_format == "tags"
++            if tags:
++                from seenav_rethink.rollout import execution_texts
++                text_actions = execution_texts(text_actions)
+             next_obs, rewards, dones, infos = envs.step(text_actions)
+@@ -367 +372,6 @@
+                 dones = dones.squeeze(1)
++            if (tags and actor_config.get("rethink_local_hints", False)
++                    and not gen_batch.meta_info.get("validate", False)):
++                from seenav_rethink.rollout import evidence
++
++                batch.non_tensor_batch["rethink_evidence"] = evidence(obs, infos, dones, _step)

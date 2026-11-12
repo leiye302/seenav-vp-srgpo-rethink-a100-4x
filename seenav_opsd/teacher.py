@@ -76,8 +76,18 @@ def attach_teacher_scores(trainer, batch):
     actor = trainer.config.actor_rollout_ref
     if actor.rollout.multi_turn.enable:
         raise ValueError("This adapter expects the native per-decision EB-Nav rollout.")
-    prefix = prefix_ids(trainer.tokenizer)
-    tensors = pack_teacher_tensors(batch.batch, prefix, int(actor.rollout.max_model_len))
+    stats = {}
+    max_len = int(actor.rollout.max_model_len)
+    policy = getattr(actor, "actor", None)
+    if getattr(policy, "output_format", None) == "tags":
+        from seenav_rethink.teacher import pack_prefixes, prefixes
+
+        prefix, local, stats = prefixes(trainer, batch, enabled=bool(getattr(policy, "rethink_local_hints", False)))
+        tensors = pack_prefixes(batch.batch, prefix, local, max_len, trainer.tokenizer.pad_token_id)
+        batch.non_tensor_batch.pop("rethink_evidence", None)
+    else:
+        prefix = prefix_ids(trainer.tokenizer)
+        tensors = pack_teacher_tensors(batch.batch, prefix, max_len)
     # Do not copy rollout metadata (including any reference/adapter mode).
     # Same Actor worker, same image tensors, no separate model, no generation.
     teacher_batch = DataProto.from_dict(tensors=tensors, non_tensors={"multi_modal_inputs": images})
@@ -88,4 +98,4 @@ def attach_teacher_scores(trainer, batch):
     if teacher.shape != mask.shape or not bool(mask.any()) or not bool(torch.isfinite(teacher[mask]).all()):
         raise ValueError("Teacher scores do not cover the native response mask.")
     batch.batch["teacher_log_probs"] = teacher
-    return {"sdar/teacher_rows": int(teacher.shape[0]), "sdar/teacher_prefix_tokens": len(prefix)}
+    return {"sdar/teacher_rows": int(teacher.shape[0]), "sdar/teacher_prefix_tokens": len(prefix), **stats}

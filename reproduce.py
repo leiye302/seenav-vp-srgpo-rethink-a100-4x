@@ -75,13 +75,14 @@ def text_sha(path):
     return hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
 
 
-def verify_opsd_source(source):
+def verify_opsd_source(source, *, extra_files=None):
     if not source.is_dir() or git(source, "rev-parse", "HEAD") != LOCK["commit"]:
         raise ValueError("Run python reproduce.py fetch to prepare the separate OPSD checkout.")
     changed = set(git(source, "diff", "--name-only", "HEAD").splitlines())
-    if changed != set(LOCK["patched_files"]):
-        raise ValueError("The OPSD checkout must differ in only the two locked hook files.")
-    for name, expected in LOCK["patched_files"].items():
+    locked_files = {**LOCK["patched_files"], **(extra_files or {})}
+    if changed != set(locked_files):
+        raise ValueError("The OPSD checkout must differ only in its locked hook files.")
+    for name, expected in locked_files.items():
         if text_sha(source / name) != expected:
             raise ValueError(f"OPSD hook differs from its lock: {name}")
     if text_sha(ROOT / "seenav_opsd" / "sdar_utils.py") != LOCK["sdar"]["loss_sha256"].lower():
@@ -190,10 +191,11 @@ def package_versions():
     return packages
 
 
-def launch(source, out, gpus):
+def launch(source, out, gpus, *, runtime=None, verify_runtime=verify_opsd_source,
+           adapt_runner=None, extra_env=None, extra_binding=None):
     if not sys.platform.startswith("linux"):
         raise ValueError("Native SeeNav training requires the documented Linux/CUDA environment.")
-    runtime = verify_opsd_source(OPSD_SOURCE)
+    runtime = verify_runtime(runtime or OPSD_SOURCE)
     if out.exists() or out.is_relative_to(source) or out.is_relative_to(runtime):
         raise ValueError("Choose a new output directory outside either source checkout.")
     # The upstream launcher passes paths through Hydra, whose CLI has special
@@ -209,12 +211,15 @@ def launch(source, out, gpus):
         "PYTHONDONTWRITEBYTECODE": "1",
         "RAY_ADDRESS": "local",
         "SEENAV_RUN_DIR": str(out),
+        **(extra_env or {}),
     }
     devices = hardware_check(env)
     native_path = source / LOCK["train_launcher"]
     native = native_path.read_text(encoding="utf-8")
     card_only = four_gpu_launcher(native)
     runner = enable_opsd(isolated_paths(card_only))
+    if adapt_runner is not None:
+        runner = adapt_runner(runner)
     out.mkdir(parents=True, exist_ok=False)
     (out / "data" / "visual").mkdir(parents=True)
     (out / "metrics").mkdir()
@@ -236,6 +241,7 @@ def launch(source, out, gpus):
         "gpus": devices,
         "model_id": LOCK["base_model"],
         "base_tasks_sha256": LOCK["evaluation_task_sha256"],
+        **(extra_binding or {}),
     }, indent=2) + "\n")
     print(f"Running native SeeNav SRGPO with Teacher-only OPSD; follow {out / 'train.log'}", flush=True)
     # bash -e reports a failed native preparation command before starting training.
@@ -245,7 +251,7 @@ def launch(source, out, gpus):
                                 stdout=log, stderr=subprocess.STDOUT)
     write_new(out / "exit.json", json.dumps({"returncode": result.returncode}) + "\n")
     verify_source(source)
-    verify_opsd_source(runtime)
+    verify_runtime(runtime)
     if result.returncode:
         raise SystemExit(f"Official launcher exited with code {result.returncode}; inspect {out / 'train.log'}")
     print(f"Native launcher exited successfully; see {out / 'metrics'} and {out / 'checkpoints'}.")
