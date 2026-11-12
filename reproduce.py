@@ -29,7 +29,7 @@ def git(source, *args, direct=False):
     if direct:
         command += ["-c", "http.proxy=", "-c", "http.version=HTTP/1.1"]
     return subprocess.check_output(
-        [*command, "-C", str(source), *args], text=True,
+        [*command, "-C", str(source), *args], encoding="utf-8",
         env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
     ).strip()
 
