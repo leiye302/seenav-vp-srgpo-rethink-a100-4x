@@ -1,12 +1,12 @@
 # SeeNav Route-SFT：复审版 v2
 
-使用 [`rethink-method` 分支](https://github.com/leiye302/seenav-vp-srgpo-opsd-a100-4x/tree/rethink-method)。
-完整图像与数据文件位于 [GitHub Release](https://github.com/leiye302/seenav-vp-srgpo-opsd-a100-4x/releases/tag/seenav-route-sft-reviewed-v2)；
+使用 [SeeNav RETHINK 独立仓库](https://github.com/leiye302/seenav-vp-srgpo-rethink-a100-4x) 的默认分支。
+完整图像与数据文件位于 [本仓库的 GitHub Release](https://github.com/leiye302/seenav-vp-srgpo-rethink-a100-4x/releases/tag/seenav-route-sft-reviewed-v2)；
 不需要原采集压缩包或发布者的工作目录。代码附带每份文件的 SHA-256。
 
 ```bash
-git clone --branch rethink-method https://github.com/leiye302/seenav-vp-srgpo-opsd-a100-4x.git
-cd seenav-vp-srgpo-opsd-a100-4x
+git clone https://github.com/leiye302/seenav-vp-srgpo-rethink-a100-4x.git
+cd seenav-vp-srgpo-rethink-a100-4x
 python download_dataset.py --output data/seenav-reviewed-v2
 python rethink.py fetch
 python train_route_sft.py check --dataset data/seenav-reviewed-v2

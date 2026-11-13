@@ -18,13 +18,13 @@
 
 ## 一键串行训练
 
-先在 Linux 服务器上检出方法分支。按 [README 的环境说明](README.md#准备环境)
+先在 Linux 服务器上克隆本方法仓库（默认 `main`）。按 [README 的环境说明](README.md#准备环境)
 创建 Python 3.10 环境，运行官方安装脚本并安装原生依赖。配置使用四张已分配的 A100 80 GB；
 Route-SFT 只用其中第一张，进程退出后，第二阶段才用四张。
 
 ```bash
-git clone --branch rethink-method https://github.com/leiye302/seenav-vp-srgpo-opsd-a100-4x.git
-cd seenav-vp-srgpo-opsd-a100-4x
+git clone https://github.com/leiye302/seenav-vp-srgpo-rethink-a100-4x.git
+cd seenav-vp-srgpo-rethink-a100-4x
 python3.10 -m venv .venv
 source .venv/bin/activate
 python -m pip install 'setuptools==75.1.0' wheel

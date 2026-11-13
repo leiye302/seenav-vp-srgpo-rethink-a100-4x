@@ -1,6 +1,6 @@
 {
   "schema": "seenav_route_sft_github_release_v1",
-  "repository": "leiye302/seenav-vp-srgpo-opsd-a100-4x",
+  "repository": "leiye302/seenav-vp-srgpo-rethink-a100-4x",
   "assets": [
     {
       "name": "seenav-route-sft-reviewed-v2-metadata.zip",

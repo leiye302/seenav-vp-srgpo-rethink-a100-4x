@@ -1,19 +1,20 @@
-# SeeNav-Agent / VP + SRGPO + OPSD / 4×A100 80GB
+# SeeNav RETHINK / Route-SFT + SRGPO + OPSD / 4×A100 80GB
 
-在作者公开的 **EmbodiedBench-Navigation / VP + SRGPO** 训练上，仅接入 Teacher-only OPSD。使用
-[SeeNav-Agent 论文 v2](https://arxiv.org/pdf/2512.02631v2) 和
-[作者代码 7ed6a59](https://github.com/WzcTHU/SeeNav-Agent/tree/7ed6a59052701951bdb2c7d51dd6d9103219cf3e)。
-这是对照实验的复现仓库，不是作者发布。Git 提交不包含权重或大数据文件。
+这是 SeeNav RETHINK 的独立复现仓库，完整方法在默认分支 `main`。
+[两阶段入口](METHOD.md#一键串行训练) 先跑 736 步 Route-SFT，再从验收通过的最终断点启动
+150 步 **VP + SRGPO + gated OPSD + Actor 路由的局部 hint**。
+只有 Actor 自己在 `</think>` 与 `<action>` 之间生成 `<RETHINK>`，
+才在 rollout 后给对应步骤的 Teacher 加提示；Student、环境和验证均不接收提示。
 
-从本基线派生的 **SeeNav RETHINK** 有单独的入口和工作目录。它使用
-`<think>…</think><RETHINK><action>…</action>`，包含 [Route-SFT 与局部 hint 的说明和运行命令](METHOD.md)。
-一阶段使用[复审后的数据集与下载说明](DATASET.md)。图像与样本文件在 GitHub Release 中，克隆代码不下载大文件。
-方法分支的 [两阶段入口](METHOD.md#一键串行训练) 会先训 Route-SFT，再从本轮最终断点启动
-**VP + SRGPO + gated OPSD + Actor 路由的局部 hint**。看基线或跑消融时使用下面的独立入口。
-下面原有的 JSON 基线命令不变。
+[复审版训练数据](DATASET.md) 在本仓库的 GitHub Release 中。克隆代码不下载图像或权重。
+[四卡 OPSD 参考仓库](https://github.com/leiye302/seenav-vp-srgpo-opsd-a100-4x) 是单独的基线；
+复现本方法不需要克隆该仓库。原 JSON 对照仍可使用这里的 `reproduce.py` 单独运行。
 
 ## 改动范围
 
+基于 [SeeNav-Agent 论文 v2](https://arxiv.org/pdf/2512.02631v2) 和
+[作者代码 7ed6a59](https://github.com/WzcTHU/SeeNav-Agent/tree/7ed6a59052701951bdb2c7d51dd6d9103219cf3e)。
+方法使用原生 VP 标签提示，保留推理和动作之间的路由边界；下文的 JSON 基线配方不变。
 保留[作者 SRGPO 启动脚本](https://github.com/WzcTHU/SeeNav-Agent/blob/7ed6a59052701951bdb2c7d51dd6d9103219cf3e/verl-agent/examples/srgpo_trainer/run_ebnav.sh)。
 除四卡 `trainer.n_gpus_per_node: 8 → 4` 和隔离产物路径之外，只加入 OPSD 的评分及损失接线。
 干净的官方 checkout 保持不变；`fetch` 把 [13 行补丁](patches/opsd.patch) 应用到另一个 checkout，
@@ -61,15 +62,15 @@ Teacher 不参与 rollout 或验证，不是用于 reference KL 的冻结基模�
 会下载 Unity 资源，需允许出站访问并为本机缓存、HF 模型和完整 FSDP checkpoint 预留磁盘。
 
 ```bash
-git clone https://github.com/leiye302/seenav-vp-srgpo-opsd-a100-4x.git
-cd seenav-vp-srgpo-opsd-a100-4x
+git clone https://github.com/leiye302/seenav-vp-srgpo-rethink-a100-4x.git
+cd seenav-vp-srgpo-rethink-a100-4x
 python3.10 -m venv .venv
 source .venv/bin/activate
 python -m pip install 'setuptools==75.1.0' wheel
-python reproduce.py fetch
+python rethink.py fetch
 ```
 
-若服务器的代理不能传输 GitHub 仓库、而直连已获准，可以用 `python reproduce.py fetch --direct`。
+若服务器的代理不能传输 GitHub 仓库、而直连已获准，可以用 `python rethink.py fetch --direct`。
 也可以通过 `--source` 指定已经克隆到该服务器的干净官方 checkout，仍会校验同一个 commit。
 不使用作者本机环境，也不需要任何仓库外的私有文件。
 
@@ -93,7 +94,11 @@ SeeNav 依赖清单指定 Transformers 4.51.1。AI2-THOR 5.0.0 和 Gym 0.26.2 �
 
 ## 检查并启动
 
+方法训练见 [一键串行训练](METHOD.md#一键串行训练)。以下是 CPU 测试与独立 JSON 基线入口：
+
 ```bash
+python rethink.py check
+python reproduce.py fetch
 python reproduce.py check
 python reproduce.py plan
 python -m unittest discover -s tests -v
