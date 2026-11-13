@@ -7,7 +7,7 @@ import torch
 
 from seenav_opsd.teacher import SKILL_FILE, pack_teacher_tensors
 from . import hints
-from .protocol import MARKER, parse_decision
+from .protocol import decode_decision, marker_token_id
 
 
 def tag_prefix(tokenizer):
@@ -28,10 +28,9 @@ def prefixes(trainer, batch, *, enabled):
     if not enabled:
         return static, {}, {}
 
-    marker_ids = tokenizer.encode(MARKER, add_special_tokens=False)
-    if len(marker_ids) != 1 or marker_ids[0] not in tokenizer.all_special_ids:
+    marker = marker_token_id(tokenizer)
+    if marker is None:
         raise ValueError("trained Actor must preserve the single special <RETHINK> token")
-    marker = marker_ids[0]
     native = batch.batch
     rows = len(native["responses"])
     width = native["responses"].shape[-1]
@@ -41,7 +40,8 @@ def prefixes(trainer, batch, *, enabled):
     stats = {"rethink/response_rows": rows, "rethink/marker_rows": len(candidates),
              "rethink/eligible_rows": 0, "rethink/unique_routed": 0, "rethink/hint_requests": 0,
              "rethink/rows_with_local_hint": 0, "rethink/unique_with_local_hint": 0,
-             "rethink/unique_static_fallback": 0, "rethink/malformed_marker_rows": 0}
+             "rethink/unique_static_fallback": 0, "rethink/malformed_marker_rows": 0,
+             "rethink/execution_mismatch_rows": 0}
     if not candidates:
         return static, {}, stats
     other = batch.non_tensor_batch
@@ -54,17 +54,18 @@ def prefixes(trainer, batch, *, enabled):
     # The native divisibility adjustment may copy or drop rows; use the
     # trajectory and physical rollout index, not a mutable batch row number.
     for i in candidates:
-        if int(marked[i].sum()) != 1:
-            stats["rethink/malformed_marker_rows"] += 1
-            continue
         ids = native["responses"][i, active[i]].tolist()
-        text = tokenizer.decode(ids, skip_special_tokens=False, clean_up_tokenization_spaces=False)
-        decision = parse_decision(text)
-        if decision is None or not decision[1]:
+        decoded = decode_decision(tokenizer, ids, marker)
+        if not decoded.routed:
             stats["rethink/malformed_marker_rows"] += 1
             continue
-        reasoning, _, move = decision
+        reasoning, _, move = decoded.parsed
         ctx = evidence[i]
+        # Physical action failure (e.g. a collision) still carries the action
+        # ID and is valid hindsight. Do not route a step with no matching move.
+        if ctx["executed_action"] != move:
+            stats["rethink/execution_mismatch_rows"] += 1
+            continue
         uid, step = str(uids[i]), int(ctx["step"])
         selected[uid].setdefault(step, (step, ctx["prompt"], reasoning, move, anchors[i]))
         locations[uid, step].append(i)

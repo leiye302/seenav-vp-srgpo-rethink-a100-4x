@@ -8,10 +8,10 @@ import tempfile
 
 import reproduce as base
 
-RUNTIME = base.ROOT / ".deps" / "SeeNav-Agent-rethink"
+RUNTIME = base.ROOT / ".deps" / "SeeNav-Agent-rethink-protocol-v2"
 PATCH = base.ROOT / "patches" / "rethink-rollout.patch"
 ROLLOUT = "verl-agent/agent_system/multi_turn_rollout/rollout_loop.py"
-EXTRA_FILES = {ROLLOUT: "4723a8f792736c8cfbcd8d2d97bdd25fe34384eb1a8fe2a561d566f32778fffe"}
+EXTRA_FILES = {ROLLOUT: "227a379b406a2c050b2b10a5b9629a5d33cf4261ddca73a46b9601c2b426877c"}
 VARIANTS = ("rethink", "tag-control", "sft-static")
 
 

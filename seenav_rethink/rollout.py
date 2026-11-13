@@ -2,13 +2,18 @@
 
 import numpy as np
 
-from .protocol import for_execution
+from .protocol import decode_decision, for_execution, marker_token_id
 
 
-def execution_texts(text_actions):
-    # The tokenizer may already have dropped the special marker. In either
-    # case the original SeeNav tag projection still executes the one action.
-    return [for_execution(text) for text in text_actions]
+def execution_texts(tokenizer, responses, attention_mask):
+    """Give the native parser only well-formed decisions; invalid means no-op."""
+    marker = marker_token_id(tokenizer)
+    active = attention_mask[:, -responses.shape[-1]:].bool()
+    result = []
+    for ids, mask in zip(responses, active, strict=True):
+        decoded = decode_decision(tokenizer, ids[mask].tolist(), marker)
+        result.append(for_execution(decoded.text) if decoded.parsed is not None else "")
+    return result
 
 
 def evidence(obs, infos, dones, step):

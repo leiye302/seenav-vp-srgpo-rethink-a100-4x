@@ -21,6 +21,7 @@ import rethink
 from seenav_opsd.teacher import attach_teacher_scores, pack_teacher_tensors
 from seenav_rethink import hints, protocol
 from seenav_rethink.data import digest_bytes, render_native_prompt, route_loss
+from seenav_rethink.rollout import execution_texts
 
 
 class Tokenizer:
@@ -43,6 +44,8 @@ class Tokenizer:
         return "".join({
             12: "<think>I should approach the marked chair.</think>",
             13: "<action>2</action>", 90: protocol.MARKER, 99: protocol.EOS,
+            14: "<think></think>", 15: "<action>3</action>",
+            16: "<RE", 17: "THINK>", 18: "\u00ad\n",
         }[i] for i in ids)
 
 
@@ -84,6 +87,49 @@ class RethinkTest(unittest.TestCase):
                     "<think>One</think><action>8</action>",
                     "<think>One</think><action>0</action><action>1</action>"):
             self.assertIsNone(protocol.parse_decision(bad))
+
+    def test_runtime_native_projection_rejects_malformed_even_if_it_has_an_action(self):
+        import importlib.util
+
+        source = Path(os.environ.get("SEENAV_TEST_SOURCE", reproduce.DEFAULT_SOURCE))
+        projection = source / reproduce.LOCK["navigation_data"] / "../projection.py"
+        spec = importlib.util.spec_from_file_location("native_projection", projection.resolve())
+        native = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(native)
+        responses = torch.tensor([
+            [12, 90, 18, 13, 99],  # valid route with SHY and EOS
+            [12, 13, 99, 90, 90],  # inactive marker padding must not trigger
+            [14, 90, 13, 99, 90],  # empty reasoning
+            [13, 12, 90, 99, 90],  # action before think
+            [12, 90, 13, 15, 99],  # two actions
+            [12, 16, 17, 13, 99],  # spelling is not the registered marker ID
+            [12, 13, 90, 99, 90],  # marker after action
+        ])
+        mask = torch.tensor([[1]*5, [1, 1, 1, 0, 0], [1, 1, 1, 1, 0],
+                             [1, 1, 1, 1, 0], [1]*5, [1]*5, [1, 1, 1, 1, 0]])
+        native_mask = torch.cat((torch.ones((len(responses), 2), dtype=torch.long), mask), dim=1)
+        texts = execution_texts(Tokenizer(), responses, native_mask)
+        actions, valids = native.ebnav_projection(texts)
+        self.assertEqual(actions, [2, 2, "", "", "", "", ""])
+        self.assertEqual(valids, [1, 1, 0, 0, 0, 0, 0])
+
+    def test_wrong_executed_action_is_not_routed_but_blocked_attempt_is(self):
+        from seenav_rethink.teacher import prefixes
+
+        b = fixture()
+        b.non_tensor_batch["rethink_evidence"][0]["feedback"] = "MoveRight was blocked."
+        b.non_tensor_batch["rethink_evidence"][3]["executed_action"] = -1
+        trainer = SimpleNamespace(tokenizer=Tokenizer(),
+                                  config=SimpleNamespace(actor_rollout_ref=SimpleNamespace(
+                                      rollout=SimpleNamespace(max_model_len=64))))
+        with patch.object(hints, "from_env", return_value=object()), patch.object(
+            hints, "request_hints", return_value=({("epA", 1): "Next move: 3. The left path is clear."}, {}, 1),
+        ) as request:
+            _, local, stats = prefixes(trainer, b, enabled=True)
+        self.assertEqual(set(request.call_args.args[2]), {"epA"})
+        self.assertEqual(set(local), {0, 1})
+        self.assertEqual(stats["rethink/execution_mismatch_rows"], 1)
+        self.assertEqual(stats["rethink/unique_routed"], 1)
 
     def test_marker_loss_has_exact_causal_index_and_full_vocab_negative(self):
         for label, target in [(0, 2), (1, 5)]:
@@ -227,7 +273,9 @@ class RethinkTest(unittest.TestCase):
     def test_locked_collector_and_launch_boundaries(self):
         runtime = rethink.verify_runtime(rethink.RUNTIME)
         content = (runtime / rethink.ROLLOUT).read_text(encoding="utf-8")
-        self.assertLess(content.index("execution_texts(text_actions)"), content.index("envs.step(text_actions)"))
+        self.assertLess(content.index("text_actions = execution_texts("), content.index("envs.step(text_actions)"))
+        self.assertIn('self.tokenizer, batch.batch["responses"], batch.batch["attention_mask"]', content)
+        self.assertIn("batch_decode(batch.batch['responses'], skip_special_tokens=True)", content)
         self.assertLess(content.index("envs.step(text_actions)"), content.index("= evidence(obs, infos"))
         self.assertIn('not gen_batch.meta_info.get("validate", False)', content)
         source = Path(os.environ.get("SEENAV_TEST_SOURCE", reproduce.DEFAULT_SOURCE))

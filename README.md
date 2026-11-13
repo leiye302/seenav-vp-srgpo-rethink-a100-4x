@@ -1,10 +1,12 @@
 # SeeNav RETHINK / Route-SFT + SRGPO + OPSD / 4×A100 80GB
 
 这是 SeeNav RETHINK 的独立复现仓库，完整方法在默认分支 `main`。
-[两阶段入口](METHOD.md#一键串行训练) 先跑 736 步 Route-SFT，再从验收通过的最终断点启动
-150 步 **VP + SRGPO + gated OPSD + Actor 路由的局部 hint**。
+[串行入口](METHOD.md#一键串行训练) 先跑 736 步 Route-SFT，再跑 150 步
+**VP + SRGPO + gated OPSD + Actor 路由的局部 hint**，最后用验收过的二阶段模型跑
+[固定 60 题 EB-Nav 终评](METHOD.md#固定-60-题终评)。
 只有 Actor 自己在 `</think>` 与 `<action>` 之间生成 `<RETHINK>`，
-才在 rollout 后给对应步骤的 Teacher 加提示；Student、环境和验证均不接收提示。
+且同一步的动作通过协议检查并提交给环境，才在 rollout 后给对应步骤的 Teacher 加提示；
+Student、环境和评测均不接收提示。方法版保持标签协议，不改成 JSON。
 
 [复审版训练数据](DATASET.md) 在本仓库的 GitHub Release 中。克隆代码不下载图像或权重。
 [四卡 OPSD 参考仓库](https://github.com/leiye302/seenav-vp-srgpo-opsd-a100-4x) 是单独的基线；
@@ -14,7 +16,7 @@
 
 基于 [SeeNav-Agent 论文 v2](https://arxiv.org/pdf/2512.02631v2) 和
 [作者代码 7ed6a59](https://github.com/WzcTHU/SeeNav-Agent/tree/7ed6a59052701951bdb2c7d51dd6d9103219cf3e)。
-方法使用原生 VP 标签提示，保留推理和动作之间的路由边界；下文的 JSON 基线配方不变。
+方法使用原生 VP 标签提示，在动作提交与 hint 路由处共用标签检查；下文的 JSON 基线配方不变。
 保留[作者 SRGPO 启动脚本](https://github.com/WzcTHU/SeeNav-Agent/blob/7ed6a59052701951bdb2c7d51dd6d9103219cf3e/verl-agent/examples/srgpo_trainer/run_ebnav.sh)。
 除四卡 `trainer.n_gpus_per_node: 8 → 4` 和隔离产物路径之外，只加入 OPSD 的评分及损失接线。
 干净的官方 checkout 保持不变；`fetch` 把 [13 行补丁](patches/opsd.patch) 应用到另一个 checkout，
@@ -33,7 +35,7 @@
 论文原配是 8 张 H20 96GB。4 卡时，上游 `adjust_batch` 会按 4 卡而非 8 卡做原生整除补齐，
 因此不承诺两个并行布局逐步数值相同。没有为此改写采样或 SRGPO 实现。
 
-## OPSD 与原对照口径
+## 独立 JSON 基线的 OPSD 口径
 
 1. Student 按原版 VP 输入采样并在 AI2-THOR 执行动作，原版 SRGPO 计算轨迹与步骤优势。
 2. 更新前，同一 Actor 的无梯度视角给**同一批已生成 token**打分。Teacher 在原 prompt 前读到
@@ -81,7 +83,7 @@ python rethink.py fetch
   cd .deps/SeeNav-Agent/verl-agent
   USE_MEGATRON=0 USE_SGLANG=0 bash scripts/install_vllm_sglang_mcore.sh
 )
-python -m pip install -r .deps/SeeNav-Agent/verl-agent/requirements.txt ai2thor==5.0.0 gym==0.26.2
+python -m pip install -r .deps/SeeNav-Agent/verl-agent/requirements.txt ai2thor==5.0.0 gym==0.26.2 filelock
 python -m pip check
 python -c 'import torch, transformers, vllm, flash_attn, ray, ai2thor; print(torch.__version__, torch.version.cuda)'
 ```
@@ -128,9 +130,10 @@ launcher、实际 launcher、源码与补丁、技能和损失的版本/哈希�
   论文正文与附录提示词也存在拼接顺序描述差异。实际双图代码按 `BEV | FV`。这些均不改。
 - 原训练内验证是从 base 任务中取 8 个，不是独立评测的固定 60 任务成功率。作者独立评测
   `SeeNav/testEBNav.py` 引用了没有随这一 commit 发布的 `DualViewGrounding`、`ActionMarker`
-  顶层模块。保留原版，不补写或替换评测逻辑。作者发布的 EB-Nav 权重见
+  顶层模块。这里的 `final_eval.py` 用公开训练包的 EB-Nav 环境和相同的 base 任务文件做独立终评，
+  不是逐字运行作者独立脚本。作者发布的 EB-Nav 权重见
   [官方 checkpoint](https://huggingface.co/wangzc9865/SeeNav-Agent)。
 
-CPU 检查覆盖原版参数对照、补丁边界、Qwen 多模态位置、Teacher token/图像/掩码一致性，
-以及 SDAR 梯度。它不代表 AI2-THOR 实机、四卡训练或论文结果已经验证。
+CPU 检查覆盖原版参数、Qwen 多模态位置、Teacher token/图像/掩码、SDAR 梯度、原动作解析器的
+格式边界、60 题覆盖及续测。它不代表 AI2-THOR 实机、四卡训练或论文结果已经验证。
 代码分别遵循上游许可证；本仓库附带 SDAR 的许可证 [副本](licenses/SDAR.txt)。

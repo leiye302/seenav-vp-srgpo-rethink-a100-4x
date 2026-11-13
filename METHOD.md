@@ -4,6 +4,7 @@
 保留 SeeNav 原生双视图、最近五步动作历史、0–7 离散动作、AI2-THOR 执行与奖励、SRGPO 优势和原始 OPSD 损失。
 唯一必须换的是输出接口：基线的 JSON 不包含可训练的原生 `</think>`–`<action>` 决策边界。
 方法版使用作者源码中已有的 VP 标签提示和动作执行器，不另写任务模板或改变观察。
+标签组在动作交给环境前先检查完整协议；四个 JSON 对照的训练不变。
 
 | 实验组 | Actor 起点 | 输出 | Teacher |
 | --- | --- | --- | --- |
@@ -13,8 +14,9 @@
 | `rethink` | 同一 Route-SFT | 原生 tags | 静态 skill；在 Actor 自主触发的位置加局部 hint |
 
 想量化局部 hint 的单独贡献，用 `sft-static` 对比 `rethink`；不要用 JSON 基线的差值单独归因给 hint。
-这三个标签组的模拟器、验证任务、采样参数和训练配方相同。保持原生动作解析和错误处理；标签之间的
-软连字符 U+00AD 可忽略，正常换行可保留，不做动作重写或强制解码。
+这三个标签组的模拟器、训练内验证、采样和训练配方相同。每步必须有非空的 `<think>…</think>`，
+其后可有一个专用 `<RETHINK>` token，最后只能有一个 0–7 的 `<action>`。分隔处允许空白和软连字符
+U+00AD。合规响应仍由原生动作解析器执行；不合规响应走原来的无效动作路径，不补写动作或强制解码。
 
 ## 一键串行训练
 
@@ -60,17 +62,19 @@ python run_pipeline.py train --model "$BASE_SNAPSHOT" --gpus 0,1,2,3 \
 `check` 只读校验源码、数据和可选的模型，不占 GPU、不发 API 请求。
 `train` 先做四卡和 hint 配置预检，再从基模跑 736 步 Route-SFT；
 只有成功导出 `stage1/global_step_736` 且数据、步数、模型文件和 marker 校验通过，才启动原生 150 个 SRGPO 更新。
-这不加载 SFT 的优化器状态。两个训练阶段也可按下方命令分别运行。
+这不加载 SFT 的优化器状态。二阶段验收后自动用第一张已分配的卡运行固定 60 题终评。
+训练阶段也可按下方命令分别运行。
 
 输出目录中，`stage1.log` 是 SFT 进度，`handoff.json` 记录待交接的父断点与数据指纹，
 `stage2/binding.json` 记录实际验收后的父断点；`stage2/train.log` 和 `stage2/metrics/` 是二阶段训练日志，
 `stage2.log` 则记录启动和交接错误。
-只有最终 FSDP 断点、Hugging Face 导出和逐步指标齐全才写 `complete.json`。其中的
+最终 FSDP 断点、Hugging Face 导出和逐步指标齐全时写 `training_complete.json`。其中的
 `hint_coverage` 是触发后实际应用 hint 的比例；`local_hint_status` 区分有应用、全部回退、完全没有触发。
 如果全程没有应用任何 hint，会明确提示，
 不能把这种结果当作有局部 hint 的训练。启动前请为基模、SFT 导出和原生二阶段 FSDP 断点留出空间。
 如果 SFT 已完成但二阶段启动失败，不必重训 SFT；修复后，用下面的独立二阶段命令
-指向原来的 `stage1/global_step_736`，并指定新的二阶段输出目录。
+指向原来的 `stage1/global_step_736`，并指定新的二阶段输出目录。完整 `complete.json` 另要求
+终评 60 题全部通过产物校验；终评中断不影响训练断点。
 
 ## 第一阶段：Route-SFT
 
@@ -123,8 +127,10 @@ CUDA_VISIBLE_DEVICES=0 python train_route_sft.py train \
 
 1. Student 仍自由生成 `<think>…</think><action>n</action>`，或者在二者之间生成一个
    `<RETHINK>`。动作由原 SeeNav 执行，**所有轨迹、所有有效响应仍参与 SRGPO**。
-2. 轨迹结束后，从响应 mask 内的**真实 token ID**找 marker。只有在完整 reasoning 与单个合法动作之间的 marker
-   算触发，不从解码日志、Analyzer 的评分、任务失败或动作优劣推断。隐藏特殊 token 的执行解码不影响路由。
+2. 从响应 mask 内的**真实 token ID**识别 marker，动作执行与 hint 路由用同一个协议解析。
+   只有完整 reasoning 和单个合法动作之间恰有一个真实 marker，且环境记录收到的是同一个动作 ID，才请求 hint。
+   撞墙等真实执行失败仍可提供事后反馈。空 reasoning、错位 marker、多个 action、普通 token 拼出的同名字串
+   都不触发 hint，也不执行动作；没有 marker 的合规动作照常执行。标签组不使用过滤特殊 token 的文本做判定。
 3. 只为触发步请求视觉 Analyzer。请求按轨迹合并，长轨迹按少量触发图分组；只发送触发步的当前双视图，
    配合其可见提示、reasoning 和本轨迹实际反馈。Analyzer 只建议一个当前状态可执行的下一步，
    **不判断 Good/Bad，不负责路由，也不替换实际执行动作**。详见 [hint 提示词](seenav_rethink/local_hint_system.txt)。
@@ -135,7 +141,7 @@ CUDA_VISIBLE_DEVICES=0 python train_route_sft.py train \
 5. 与原基线使用**同一份 SDAR loss**：`sdar_gate_beta=5`、系数 `0.01`、原响应 token-mean。
    原 reference KL、奖励、采样、SRGPO 轨迹/步骤优势、四卡配置、验证间隔和保存计划不改。
    原生 Actor/reference 仍由共享模型路径初始化；以 SFT 起跑的两组使用同一个 SFT 父断点。
-   原生训练内 8 任务验证不等同于作者单独的 60 题 benchmark；本入口不把它报告为后者。
+   原生每 5 步的 8 任务验证不等同于固定 60 题终评。
 
 ```bash
 python rethink.py check --stage1 "$ROUTE_SFT_CHECKPOINT"
@@ -155,11 +161,42 @@ python rethink.py train --gpus 0,1,2,3 --stage1 "$ROUTE_SFT_CHECKPOINT" --output
 `tag-control` 不传 `--stage1`，`sft-static` 传同一个 `--stage1`；两者都不需要 API。
 默认每请求最多 4 张图、并发 4、单次 45 秒，最多两次尝试；每个 update 的提示队列共享 180 秒预算。
 可用 `SEENAV_HINT_{IMAGES_PER_REQUEST,PARALLEL,TIMEOUT,ATTEMPTS,MAX_TOKENS,UPDATE_BUDGET}` 显式配置。
-训练指标中分开记录原始 marker 行、合规触发、实际应用、去重后提示数和失败回退。
+训练指标中分开记录原始 marker 行、协议不合规和环境动作不一致的行、合规触发、实际应用和失败回退。
 没有触发或 API 持续异常时，局部提示覆盖会下降；训练不会因单个提示不可用而中止。
+
+## 固定 60 题终评
+
+按锁定的作者 `base.json` 顺序评测 60 个初始状态，逐题核对场景、目标和初始位姿，不抽样、不重复。
+每题从空 assistant 前缀自由生成，最多 20 次决策，环境以距目标的水平距离不超过 1 m 判成功。
+沿用 500×500 双视图、最近五步历史、0.25 m 移动与 90° 转向；终评使用论文附录和作者独立评测的
+30° 俯仰，不更改训练中的原生 YAML。采样固定 seed 0、temperature 0.4、top-p 1，最大响应 1024 token。
+公开独立脚本有缺失模块，因此终评复用公开训练包的 AI2-THOR 环境和 VP，不宣称与论文分数逐步相同。
+终评不用 Teacher 或 Analyzer，不发送轨迹或图像给外部模型。
+
+一键流程默认写 `final_eval/contract.json`、每题的 `episode_*.json` 和 `final_eval/summary.json`。
+成功率为成功任务数除以 60；marker 率、合规触发率、动作执行成功率、格式有效率和截断率按决策另记。
+终评中断后不需要重训：用相同评测环境、同一模型和输出路径接着测未完成的题。
+
+```bash
+# 一键流程的终评中断，或旧的完整方法跑完但还没测 60 题
+python run_pipeline.py final-eval --output runs/seenav-rethink --gpus 0
+
+# 单独启动的标签实验：SFT、sft-static 或 rethink 的本地 HF 导出
+CUDA_VISIBLE_DEVICES=0 python final_eval.py run --model "$TAG_HF_EXPORT" \
+  --format tags --output runs/tag-eval60
+
+# 已有的 JSON 对照，保持原生 JSON 提示与解析，使用同一份 60 题
+CUDA_VISIBLE_DEVICES=0 python final_eval.py run --model "$JSON_HF_EXPORT" \
+  --format json --output runs/json-eval60
+```
+
+模型须是完整本地 HF 导出，例如二阶段的 `checkpoints/global_step_150/actor/huggingface`。
+方法模型可加 `--require-marker` 校验导出保留专用 token；不要求模型实际触发到某一比例。
+`final_eval.py plan --format tags` 可在 CPU 核对固定任务与评测配置。
 
 ## 本地验收
 
 `python -m unittest discover -s tests -v` 验证原基线不变、CE/BCE 位置、真实 token 路由、
-双视图输入、Teacher mask/位置、API 分组和 fallback，以及两阶段交接和最后产物检查。测试用模拟 API，不会计费。
+双视图输入、Teacher mask/位置、API 分组和 fallback、训练断点交接与固定 60 题终评续测。
+测试用模拟 API 和环境，不会计费。
 `fetch/check/plan` 只验证锁定源码、资产和启动配置，不代表 GPU、AI2-THOR 或真实 API 已跑通。

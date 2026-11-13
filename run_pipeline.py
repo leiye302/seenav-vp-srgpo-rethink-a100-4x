@@ -1,14 +1,16 @@
-"""Train SeeNav Route-SFT, then native VP + SRGPO + OPSD with Actor-routed hints."""
+"""Train both SeeNav stages, then run the fixed 60-task EB-Nav evaluation."""
 
 import argparse
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 
 import reproduce as base
 import rethink
+import final_eval
 from seenav_rethink.assets import model_files, stage1_binding, verify_parent
 from seenav_rethink.data import check, load_json
 
@@ -85,15 +87,66 @@ def stage2_result(output, updates=STAGE2_UPDATES):
     }
 
 
-def run_stage(argv, logfile, env):
-    with logfile.open("xb") as log:
+def run_stage(argv, logfile, env, *, resume_log=False):
+    with logfile.open("ab" if resume_log else "xb") as log:
         result = subprocess.run(argv, cwd=base.ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)
     if result.returncode:
-        raise SystemExit(f"Training process exited with code {result.returncode}; see {logfile}")
+        raise SystemExit(f"Process exited with code {result.returncode}; see {logfile}")
 
 
 def record(path, payload):
     base.write_new(path, json.dumps(payload, indent=2, allow_nan=False) + "\n")
+
+
+def without_hints(device):
+    env = {k: v for k, v in os.environ.items() if not k.startswith("SEENAV_HINT_")}
+    return {**env, "CUDA_VISIBLE_DEVICES": device}
+
+
+def evaluation_device(requested, visible):
+    value = requested or visible or ""
+    parts = [part.strip() for part in value.split(",")]
+    if requested is not None:
+        check(len(parts) == 1, "For final-eval, select one GPU with --gpus.")
+    device = parts[0]
+    check(re.fullmatch(r"(?:[0-9]+|GPU-[0-9a-fA-F-]+)", device), "Select an allocated evaluation GPU.")
+    if visible is not None:
+        check(device in {part.strip() for part in visible.split(",")}, "Evaluation GPU is not allocated.")
+    return device
+
+
+def finish(output, source, device):
+    from filelock import FileLock
+
+    with FileLock(str(output / ".finish.lock"), timeout=0):
+        result = stage2_result(output / "stage2")
+        trained = output / "training_complete.json"
+        if trained.exists():
+            check(load_json(trained) == result, "Training receipt does not match Stage 2.")
+        else:
+            final_eval.atomic_json(trained, result)
+        if not result["local_hint_applied"]:
+            print("WARNING: Stage 2 finished without an applied local hint; this run does not demonstrate hint training.",
+                  flush=True)
+        model = output / result["hf_export"]
+        evaluated = output / "final_eval"
+        argv = [sys.executable, "-u", str(base.ROOT / "final_eval.py"), "run",
+                "--source", str(source), "--model", str(model), "--output", str(evaluated),
+                "--format", "tags", "--require-marker"]
+        print(f"Final evaluation: fixed EB-Nav 60; follow {output / 'final_eval.log'}", flush=True)
+        run_stage(argv, output / "final_eval.log", without_hints(device), resume_log=True)
+        summary = final_eval.verify_result(evaluated, source, "tags", model=model, require_marker=True)
+        payload = {**result, "final_eval": {
+            "summary": "final_eval/summary.json", "episodes": summary["episodes"],
+            "successes": summary["successes"], "success_rate": summary["success_rate"],
+            "tasks_sha256": summary["tasks_sha256"], "contract_sha256": summary["contract_sha256"],
+        }}
+        complete = output / "complete.json"
+        if complete.exists():
+            previous = load_json(complete)
+            check(previous in (result, payload), "Existing completion receipt describes a different run.")
+        final_eval.atomic_json(complete, payload)
+        print(f"Verified both stages and fixed 60-task evaluation; see {complete}", flush=True)
 
 
 def run(dataset, source, model, receipt, output, devices, digest, steps, save_state):
@@ -101,10 +154,8 @@ def run(dataset, source, model, receipt, output, devices, digest, steps, save_st
     output.mkdir(parents=True, exist_ok=False)
     # The vision API is needed only by Stage 2. Its settings are not command
     # line arguments and are not written by this pipeline.
-    sft_env = {k: v for k, v in os.environ.items() if not k.startswith("SEENAV_HINT_")}
-    sft_env["CUDA_VISIBLE_DEVICES"] = devices[0]
     print(f"Stage 1: Route-SFT; follow {output / 'stage1.log'}", flush=True)
-    run_stage(first, output / "stage1.log", sft_env)
+    run_stage(first, output / "stage1.log", without_hints(devices[0]))
 
     manifest, _ = stage1_binding(checkpoint, expected_dataset=digest, expected_step=steps)
     record(output / "handoff.json", {
@@ -119,25 +170,26 @@ def run(dataset, source, model, receipt, output, devices, digest, steps, save_st
     # marker token before starting its GPU workers.
     print(f"Stage 2: native SRGPO + OPSD + routed hints; follow {output / 'stage2/train.log'}", flush=True)
     run_stage(second, output / "stage2.log", {**os.environ, "CUDA_VISIBLE_DEVICES": ",".join(devices)})
-    result = stage2_result(output / "stage2")
-    record(output / "complete.json", result)
-    if not result["local_hint_applied"]:
-        print("WARNING: Stage 2 finished without an applied local hint; this run does not demonstrate hint training.",
-              flush=True)
-    print(f"Verified both stages; see {output / 'complete.json'}", flush=True)
+    finish(output, source, devices[0])
 
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("command", choices=("check", "train"))
+    p.add_argument("command", choices=("check", "train", "final-eval"))
     p.add_argument("--dataset", type=Path, default=base.ROOT / "data/seenav-reviewed-v2")
     p.add_argument("--source", type=Path, default=base.DEFAULT_SOURCE)
     p.add_argument("--model", type=Path, help="Pinned local Qwen2.5-VL-3B-Instruct snapshot")
     p.add_argument("--model-receipt", type=Path, help="SHA-256 receipt for a relocated base model")
     p.add_argument("--output", type=Path, help="New directory for both stages")
-    p.add_argument("--gpus", help="Four allocated A100 80 GB devices, or use CUDA_VISIBLE_DEVICES")
+    p.add_argument("--gpus", help="Four allocated A100 80 GB devices for train; one allocated GPU for final-eval")
     p.add_argument("--save-training-state", action="store_true", help="Also save the Stage-1 optimizer/scheduler/RNG")
     args = p.parse_args()
+    if args.command == "final-eval":
+        if args.output is None or not args.output.is_dir():
+            p.error("final-eval requires the existing pipeline --output directory")
+        device = evaluation_device(args.gpus, os.environ.get("CUDA_VISIBLE_DEVICES"))
+        finish(args.output.resolve(), base.verify_source(args.source.resolve()), device)
+        return
     if args.command == "train" and (args.model is None or args.output is None):
         p.error("train requires --model and --output")
     if args.model_receipt is not None and args.model is None:
@@ -155,6 +207,7 @@ def main():
         subprocess.run(cmd, cwd=base.ROOT, check=True)
         print(json.dumps({"stage1_updates": steps, "stage2_updates_expected": STAGE2_UPDATES,
                           "stage2": "SRGPO + gated OPSD + Actor-routed local hints",
+                          "final_eval_tasks": final_eval.PROTOCOL["episodes"],
                           "gpu_or_api_used": False}, indent=2))
         return
     check(sys.platform.startswith("linux"), "The full pipeline needs Linux/CUDA and the native SeeNav environment.")

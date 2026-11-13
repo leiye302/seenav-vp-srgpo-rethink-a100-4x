@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
+import final_eval
 import rethink
 import run_pipeline as pipeline
 from seenav_rethink import assets
@@ -67,14 +68,14 @@ class PipelineTest(unittest.TestCase):
             digest = "a" * 64
             calls = []
 
-            def launch(argv, log, env):
+            def launch(argv, log, env, **kwargs):
                 calls.append((argv, log.name, env["CUDA_VISIBLE_DEVICES"]))
                 if log.name == "stage1.log":
                     self.assertNotIn("SEENAV_HINT_API_KEY", env)
                     self.assertEqual(argv[2], "train")
                     self.assertFalse((output / "handoff.json").exists())
                     fake_stage1(output / "stage1/global_step_736", digest, 736)
-                else:
+                elif log.name == "stage2.log":
                     self.assertEqual(env["SEENAV_HINT_API_KEY"], "test-placeholder")
                     self.assertEqual(argv[argv.index("--variant") + 1], "rethink")
                     self.assertEqual(argv[argv.index("--expect-stage1-dataset") + 1], digest)
@@ -84,17 +85,33 @@ class PipelineTest(unittest.TestCase):
                     self.assertTrue((ckpt / "checkpoint_manifest.json").is_file())
                     self.assertEqual(pipeline.load_json(output / "handoff.json")["stage2_variant"], "rethink")
                     fake_stage2(output / "stage2", pipeline.STAGE2_UPDATES)
+                else:
+                    self.assertEqual(log.name, "final_eval.log")
+                    self.assertNotIn("SEENAV_HINT_API_KEY", env)
+                    self.assertTrue(kwargs["resume_log"])
+                    self.assertTrue((output / "training_complete.json").is_file())
+                    self.assertFalse((output / "complete.json").exists())
+                    self.assertEqual(argv[argv.index("--format") + 1], "tags")
+                    self.assertIn("--require-marker", argv)
+                    self.assertEqual(Path(argv[argv.index("--model") + 1]),
+                                     output / "stage2/checkpoints/global_step_150/actor/huggingface")
 
+            summary = {"episodes": 60, "successes": 30, "success_rate": .5,
+                       "tasks_sha256": "c"*64, "contract_sha256": "d"*64}
             with patch.dict(os.environ, {"SEENAV_HINT_API_KEY": "test-placeholder"}), patch.object(
-                    pipeline, "run_stage", side_effect=launch):
+                    pipeline, "run_stage", side_effect=launch), patch.object(
+                    final_eval, "verify_result", return_value=summary):
                 pipeline.run(root / "data", root / "source", root / "model", None, output,
                              ["2", "3", "6", "7"], digest, 736, False)
-            self.assertEqual([(log, ids) for _, log, ids in calls], [("stage1.log", "2"), ("stage2.log", "2,3,6,7")])
+            self.assertEqual([(log, ids) for _, log, ids in calls],
+                             [("stage1.log", "2"), ("stage2.log", "2,3,6,7"), ("final_eval.log", "2")])
             result = pipeline.load_json(output / "complete.json")
             self.assertEqual(result["hint_coverage"], 0.5)
             self.assertTrue(result["local_hint_applied"])
             self.assertEqual(result["local_hint_status"], "applied")
             self.assertEqual(result["updates"], pipeline.STAGE2_UPDATES)
+            self.assertEqual(result["final_eval"]["episodes"], 60)
+            self.assertEqual(result["final_eval"]["success_rate"], .5)
 
     def test_no_second_stage_after_failed_or_wrong_sft(self):
         for failure in ("subprocess", "wrong_data", "wrong_step"):
@@ -131,6 +148,24 @@ class PipelineTest(unittest.TestCase):
             (out / "checkpoints/global_step_2/actor/optim_world_size_4_rank_1.pt").unlink()
             with self.assertRaisesRegex(ValueError, "checkpoint is incomplete"):
                 pipeline.stage2_result(out, updates=2)
+
+    def test_final_eval_can_retry_without_retraining_or_erasing_training_receipt(self):
+        with TemporaryDirectory() as tmp:
+            out = Path(tmp) / "run"
+            fake_stage2(out / "stage2", pipeline.STAGE2_UPDATES)
+            with patch.object(pipeline, "run_stage", side_effect=SystemExit(1)):
+                with self.assertRaises(SystemExit):
+                    pipeline.finish(out, Path("source"), "0")
+            self.assertTrue((out / "training_complete.json").is_file())
+            self.assertFalse((out / "complete.json").exists())
+            summary = {"episodes": 60, "successes": 1, "success_rate": 1/60,
+                       "tasks_sha256": "c"*64, "contract_sha256": "d"*64}
+            with patch.object(pipeline, "run_stage") as run_stage, patch.object(
+                    final_eval, "verify_result", return_value=summary):
+                pipeline.finish(out, Path("source"), "0")
+            self.assertEqual(run_stage.call_count, 1)
+            self.assertEqual(run_stage.call_args.args[1].name, "final_eval.log")
+            self.assertEqual(pipeline.load_json(out / "complete.json")["final_eval"]["successes"], 1)
 
     def test_stage2_launcher_rejects_corrupted_sft_weights_before_worker_launch(self):
         # A fake Transformers module is enough: checksum validation must fail
