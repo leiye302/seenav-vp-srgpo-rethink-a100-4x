@@ -16,6 +16,62 @@
 这三个标签组的模拟器、验证任务、采样参数和训练配方相同。保持原生动作解析和错误处理；标签之间的
 软连字符 U+00AD 可忽略，正常换行可保留，不做动作重写或强制解码。
 
+## 一键串行训练
+
+先在 Linux 服务器上检出方法分支。按 [README 的环境说明](README.md#准备环境)
+创建 Python 3.10 环境，运行官方安装脚本并安装原生依赖。配置使用四张已分配的 A100 80 GB；
+Route-SFT 只用其中第一张，进程退出后，第二阶段才用四张。
+
+```bash
+git clone --branch rethink-method https://github.com/leiye302/seenav-vp-srgpo-opsd-a100-4x.git
+cd seenav-vp-srgpo-opsd-a100-4x
+python3.10 -m venv .venv
+source .venv/bin/activate
+python -m pip install 'setuptools==75.1.0' wheel
+python rethink.py fetch
+```
+
+完成 README 中的依赖安装后，在同一环境继续：
+
+```bash
+python download_dataset.py --output data/seenav-reviewed-v2
+BASE_SNAPSHOT="$(python - <<'PY'
+from huggingface_hub import snapshot_download
+print(snapshot_download(
+    "Qwen/Qwen2.5-VL-3B-Instruct", revision="66285546d2b821cf421d4f5eb2576359d3770cd3",
+    allow_patterns=["*.json", "*.jinja", "*.txt", "*.safetensors"], token=False,
+))
+PY
+)"
+
+python run_pipeline.py check --model "$BASE_SNAPSHOT"
+
+export SEENAV_HINT_API_URL="https://provider.example/v1/chat/completions"
+export SEENAV_HINT_MODEL="your-vision-model"
+read -rsp 'Hint API key: ' SEENAV_HINT_API_KEY; echo
+export SEENAV_HINT_API_KEY
+# 可选：不使用联网的 W&B 日志。
+export WANDB_MODE=offline
+python run_pipeline.py train --model "$BASE_SNAPSHOT" --gpus 0,1,2,3 \
+  --output runs/seenav-rethink
+```
+
+默认读取本仓库 Release 的复审版数据。可以用 `--dataset` 指定它在别处的完整本地副本。
+`check` 只读校验源码、数据和可选的模型，不占 GPU、不发 API 请求。
+`train` 先做四卡和 hint 配置预检，再从基模跑 736 步 Route-SFT；
+只有成功导出 `stage1/global_step_736` 且数据、步数、模型文件和 marker 校验通过，才启动原生 150 个 SRGPO 更新。
+这不加载 SFT 的优化器状态。两个训练阶段也可按下方命令分别运行。
+
+输出目录中，`stage1.log` 是 SFT 进度，`handoff.json` 记录待交接的父断点与数据指纹，
+`stage2/binding.json` 记录实际验收后的父断点；`stage2/train.log` 和 `stage2/metrics/` 是二阶段训练日志，
+`stage2.log` 则记录启动和交接错误。
+只有最终 FSDP 断点、Hugging Face 导出和逐步指标齐全才写 `complete.json`。其中的
+`hint_coverage` 是触发后实际应用 hint 的比例；`local_hint_status` 区分有应用、全部回退、完全没有触发。
+如果全程没有应用任何 hint，会明确提示，
+不能把这种结果当作有局部 hint 的训练。启动前请为基模、SFT 导出和原生二阶段 FSDP 断点留出空间。
+如果 SFT 已完成但二阶段启动失败，不必重训 SFT；修复后，用下面的独立二阶段命令
+指向原来的 `stage1/global_step_736`，并指定新的二阶段输出目录。
+
 ## 第一阶段：Route-SFT
 
 - Actor 输入是原生 VP 提示、当前 BEV+FV 双视图、已有动作与反馈，以及该步实际采集的 `<think>…</think>` token。
@@ -42,7 +98,7 @@ $$
 
 1. 已审核并封存的 `seenav_native_route_sft_v1` 数据包：`manifest.json`、`train.jsonl`、
    `validation.jsonl`、两个 `*_batches.jsonl`、manifest 所列的 PNG 分片。
-   默认使用[复审版 GitHub Release](DATASET.md)，可用下方命令从仓库下载。原 605 批旧包仅为兼容输入，
+   完整流程使用[复审版 GitHub Release](DATASET.md)，可用下方命令从仓库下载。原 605 批旧包仅为单阶段兼容输入，
    不随此次发布分发；不会自动选用未验收的候选或旧权重。
    旧包的结构化图像渲染器省略了图像前一个换行；适配器校验原摘要后，用在线 SRGPO 实际保留换行的
    原生 chat 渲染训练。原图、reasoning token、动作与监督位置不因此改写。
@@ -103,5 +159,5 @@ python rethink.py train --gpus 0,1,2,3 --stage1 "$ROUTE_SFT_CHECKPOINT" --output
 ## 本地验收
 
 `python -m unittest discover -s tests -v` 验证原基线不变、CE/BCE 位置、真实 token 路由、
-双视图输入、Teacher mask/位置、API 分组和 fallback。测试用模拟 API，不会计费。
+双视图输入、Teacher mask/位置、API 分组和 fallback，以及两阶段交接和最后产物检查。测试用模拟 API，不会计费。
 `fetch/check/plan` 只验证锁定源码、资产和启动配置，不代表 GPU、AI2-THOR 或真实 API 已跑通。

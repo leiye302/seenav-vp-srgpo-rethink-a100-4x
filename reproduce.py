@@ -163,6 +163,13 @@ def gpu_ids(requested, visible):
     return ids
 
 
+def check_run_path(path):
+    # These paths are interpolated into Hydra override values by the native
+    # Bash runner. Shell quoting alone does not escape Hydra's grammar.
+    if any(c in str(path) for c in (" ", "\t", "\r", "\n", ",", "=", "[", "]", "{", "}", '"', "'", "\\")):
+        raise ValueError("Choose a path without whitespace or Hydra metacharacters.")
+
+
 def hardware_check(env):
     code = """
 import json
@@ -198,10 +205,7 @@ def launch(source, out, gpus, *, runtime=None, verify_runtime=verify_opsd_source
     runtime = verify_runtime(runtime or OPSD_SOURCE)
     if out.exists() or out.is_relative_to(source) or out.is_relative_to(runtime):
         raise ValueError("Choose a new output directory outside either source checkout.")
-    # The upstream launcher passes paths through Hydra, whose CLI has special
-    # meanings for these characters. Keep the path explicit instead of guessing.
-    if any(c in str(out) for c in (" ", "\t", "\r", "\n", ",", "=", "[", "]", "{", "}", '"', "'", "\\")):
-        raise ValueError("Choose an output path without whitespace or Hydra metacharacters.")
+    check_run_path(out)
     ids = gpu_ids(gpus, os.environ.get("CUDA_VISIBLE_DEVICES"))
     env = {
         **os.environ,

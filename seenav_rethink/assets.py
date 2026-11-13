@@ -47,9 +47,8 @@ def verify_parent(model, receipt=None):
     return None
 
 
-def verify_stage1(model):
-    from transformers import AutoTokenizer
-
+def stage1_binding(model, *, expected_dataset=None, expected_step=None):
+    """Check lineage and file membership before reading any large shards."""
     weights = model_files(model)
     manifest = model / "checkpoint_manifest.json"
     spec = load_json(manifest)
@@ -63,12 +62,25 @@ def verify_stage1(model):
           and weights <= files.keys()
           and {p.name for p in model.iterdir() if p.is_file()} == set(files) | {manifest.name},
           "expected a completed SeeNav Route-SFT export and its manifest")
+    if expected_dataset is not None:
+        check(binding["dataset_sha256"] == expected_dataset, "Route-SFT dataset does not match the pipeline")
+    if expected_step is not None:
+        check(spec["step"] == expected_step, "Route-SFT did not reach the expected final step")
+    return manifest, spec
+
+
+def verify_stage1(model, *, expected_dataset=None, expected_step=None):
+    from transformers import AutoTokenizer
+
+    manifest, spec = stage1_binding(model, expected_dataset=expected_dataset, expected_step=expected_step)
     # Optimizer state is never used by the Stage-2 actor.
-    verify_entries(model, files, skip=("training_state.pt",))
+    verify_entries(model, spec["files"], skip=("training_state.pt",))
     tok = AutoTokenizer.from_pretrained(model, trust_remote_code=False, local_files_only=True)
     ids = tok.encode(MARKER, add_special_tokens=False)
     config = load_json(model / "config.json")
     vocab = config.get("text_config", config)["vocab_size"]
-    check(len(ids) == 1 and ids[0] in tok.all_special_ids and ids[0] < vocab
+    check(len(ids) == 1 and ids[0] in tok.all_special_ids and 0 <= ids[0] < vocab
+          and ids[0] not in {tok.eos_token_id, tok.pad_token_id}
           and tok.decode(ids, skip_special_tokens=False) == MARKER, "missing native marker ID")
-    return {"step": spec["step"], "manifest_sha256": sha(manifest), "marker_token_id": ids[0]}
+    return {"step": spec["step"], "manifest_sha256": sha(manifest),
+            "dataset_sha256": spec["binding"]["dataset_sha256"], "marker_token_id": ids[0]}

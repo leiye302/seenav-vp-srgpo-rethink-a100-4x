@@ -3,6 +3,7 @@
 import argparse
 import json
 from pathlib import Path
+import re
 import tempfile
 
 import reproduce as base
@@ -61,6 +62,8 @@ def main():
     p.add_argument("--direct", action="store_true", help="Fetch the official public checkout over direct HTTPS")
     p.add_argument("--variant", default="rethink", choices=VARIANTS)
     p.add_argument("--stage1", type=Path, help="Completed local Stage-1 Hugging Face export")
+    p.add_argument("--expect-stage1-dataset", help="Require this SHA-256 of the Stage-1 dataset manifest")
+    p.add_argument("--expect-stage1-step", type=int, help="Require this completed Route-SFT update")
     p.add_argument("--gpus", help="Four allocated GPUs, or use CUDA_VISIBLE_DEVICES")
     p.add_argument("--output", type=Path, help="New output directory for Stage 2")
     args = p.parse_args()
@@ -84,12 +87,19 @@ def main():
         "rethink_local_hints": args.variant == "rethink",
     }
     checkpoint = args.stage1.resolve() if args.stage1 else None
+    expected_hash, expected_step = args.expect_stage1_dataset, args.expect_stage1_step
+    if expected_hash is not None and not re.fullmatch(r"[0-9a-f]{64}", expected_hash):
+        p.error("--expect-stage1-dataset must be a SHA-256 hex digest")
+    if expected_step is not None and expected_step < 1:
+        p.error("--expect-stage1-step must be positive")
+    if (expected_hash is not None or expected_step is not None) and checkpoint is None:
+        p.error("Stage-1 expectations require --stage1")
     if checkpoint is not None:
         from seenav_rethink.assets import verify_stage1
 
         if args.variant == "tag-control":
             raise ValueError("Tag control starts from the baseline base model, without Stage 1.")
-        binding["stage1"] = verify_stage1(checkpoint)
+        binding["stage1"] = verify_stage1(checkpoint, expected_dataset=expected_hash, expected_step=expected_step)
     if args.command == "check":
         print(json.dumps({**binding, "official_commit": base.LOCK["commit"], "sdar": base.LOCK["sdar"],
                           "check": "CPU source/assets only, not GPU, simulator or API"}, indent=2))
@@ -100,9 +110,10 @@ def main():
     else:
         if args.output is None or (args.variant != "tag-control" and checkpoint is None):
             raise ValueError("Provide --output and, for a Stage-1 variant, --stage1.")
-        if checkpoint and (args.output.resolve().is_relative_to(checkpoint)
-                or any(c in str(checkpoint) for c in (" ", "\t", "\n", "\r", ",", "=", "[", "]", "{", "}", '"', "'", "\\"))):
-            raise ValueError("Use a separate output path and a Stage-1 path without Hydra metacharacters.")
+        if checkpoint:
+            base.check_run_path(checkpoint)
+            if args.output.resolve().is_relative_to(checkpoint):
+                raise ValueError("Use an output path outside the Stage-1 checkpoint.")
         if args.variant == "rethink":
             from seenav_rethink.hints import from_env
 

@@ -8,6 +8,8 @@
 从本基线派生的 **SeeNav RETHINK** 有单独的入口和工作目录。它使用
 `<think>…</think><RETHINK><action>…</action>`，包含 [Route-SFT 与局部 hint 的说明和运行命令](METHOD.md)。
 一阶段使用[复审后的数据集与下载说明](DATASET.md)。图像与样本文件在 GitHub Release 中，克隆代码不下载大文件。
+方法分支的 [两阶段入口](METHOD.md#一键串行训练) 会先训 Route-SFT，再从本轮最终断点启动
+**VP + SRGPO + gated OPSD + Actor 路由的局部 hint**。看基线或跑消融时使用下面的独立入口。
 下面原有的 JSON 基线命令不变。
 
 ## 改动范围
