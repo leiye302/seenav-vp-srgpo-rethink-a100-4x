@@ -12,6 +12,7 @@ import time
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
+from uuid import uuid4
 
 import numpy as np
 from PIL import Image
@@ -20,6 +21,13 @@ SYSTEM = Path(__file__).with_name("local_hint_system.txt")
 MAX_HINT_CHARS = 320
 MAX_BODY_BYTES = 2 * 1024**2
 HINT = re.compile(r"Next move: [0-7]\. [^\r\n<>]+\Z")
+
+
+def is_opencode_go(endpoint):
+    url = urlsplit(endpoint)
+    return (url.scheme == "https" and url.hostname == "opencode.ai"
+            and url.port in (None, 443)
+            and (url.path.startswith("/inference/go/") or url.path.startswith("/zen/go/")))
 
 
 @dataclass(frozen=True)
@@ -33,6 +41,7 @@ class Settings:
     images_per_request: int = 4
     max_tokens: int = 2048
     update_budget: int = 180
+    session_id: str | None = None
 
 
 def from_env():
@@ -99,9 +108,12 @@ class NoRedirect(HTTPRedirectHandler):
 
 
 def post(settings, payload):
+    headers = {"Authorization": "Bearer " + settings.key, "Content-Type": "application/json",
+               "Accept": "application/json", "User-Agent": "seenav-rethink-hints/1.0"}
+    if settings.session_id is not None and is_opencode_go(settings.endpoint):
+        headers["x-opencode-session"] = settings.session_id
     req = Request(settings.endpoint, data=json.dumps(payload, ensure_ascii=False).encode(),
-                  headers={"Authorization": "Bearer " + settings.key, "Content-Type": "application/json",
-                           "Accept": "application/json"}, method="POST")
+                  headers=headers, method="POST")
     with build_opener(NoRedirect()).open(req, timeout=settings.timeout) as response:
         body = response.read(MAX_BODY_BYTES+1)
         if len(body) > MAX_BODY_BYTES:
@@ -205,11 +217,15 @@ def request_hints(settings, trajectories, selections):
     def request(job):
         uid, timeline, selected = job
         try:
-            good, failed, attempts = one_request(settings, timeline, selected, deadline)
+            good, failed, attempts = one_request(episode_settings[uid], timeline, selected, deadline)
         except Exception:
             good, failed, attempts = {}, {x[0]: "request_failure" for x in selected}, 0
         return uid, good, failed, attempts
 
+    # Identify this client truthfully. All chunks and retries for an episode
+    # share one random session ID on Go; no task, account, or other run ID is sent.
+    episode_settings = ({uid: replace(settings, session_id=uuid4().hex) for uid in selections}
+                        if is_opencode_go(settings.endpoint) else {uid: settings for uid in selections})
     hints, errors, attempts = {}, {}, 0
     with ThreadPoolExecutor(max_workers=min(len(jobs), settings.parallel)) as pool:
         for uid, good, failed, n in pool.map(request, jobs):

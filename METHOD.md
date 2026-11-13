@@ -150,6 +150,8 @@ python rethink.py train --gpus 0,1,2,3 --stage1 "$ROUTE_SFT_CHECKPOINT" --output
 ```
 
 没有预设提供方或模型。只有 `rethink` 训练组会调用 API；请使用有权限把当前导航图和轨迹反馈发送给该服务的数据。
+使用 OpenCode Go 的 Chat Completions 端点时，客户端会标识自身，并按轨迹发送稳定的 `x-opencode-session`。
+请在提供方侧确认用途与计费设置；本启动器不会切换到其他模型或端点。
 `tag-control` 不传 `--stage1`，`sft-static` 传同一个 `--stage1`；两者都不需要 API。
 默认每请求最多 4 张图、并发 4、单次 45 秒，最多两次尝试；每个 update 的提示队列共享 180 秒预算。
 可用 `SEENAV_HINT_{IMAGES_PER_REQUEST,PARALLEL,TIMEOUT,ATTEMPTS,MAX_TOKENS,UPDATE_BUDGET}` 显式配置。

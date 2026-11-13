@@ -181,6 +181,33 @@ class RethinkTest(unittest.TestCase):
         self.assertEqual(set(good), {1})
         self.assertEqual(set(rejected), {2})
 
+    def test_go_session_stays_with_episode_and_is_not_sent_to_other_providers(self):
+        from dataclasses import replace
+
+        cfg = hints.Settings("https://opencode.ai/inference/go/openai/v1/chat/completions",
+                             "demo", "placeholder", parallel=1, images_per_request=1)
+        slots = []
+
+        def request(settings, timeline, selected, deadline):
+            slots.append(settings.session_id)
+            return {}, {}, 0
+
+        jobs = {"ep1": {1: (1,), 2: (2,)}, "ep2": {1: (1,)}}
+        with patch.object(hints, "one_request", side_effect=request):
+            hints.request_hints(cfg, {uid: {} for uid in jobs}, jobs)
+        self.assertIsNotNone(slots[0])
+        self.assertEqual(slots[0], slots[1])
+        self.assertNotEqual(slots[0], slots[2])
+
+        for endpoint, session in ((cfg.endpoint, slots[0]),
+                                  ("https://other.invalid/inference/go/v1/chat/completions", None)):
+            with patch.object(hints, "build_opener") as opener:
+                opener.return_value.open.return_value.__enter__.return_value.read.return_value = b'{}'
+                hints.post(replace(cfg, endpoint=endpoint, session_id=slots[0]), {"model": "demo"})
+                req = opener.return_value.open.call_args.args[0]
+            self.assertEqual(req.get_header("User-agent"), "seenav-rethink-hints/1.0")
+            self.assertEqual(req.get_header("X-opencode-session"), session)
+
     def test_native_anchor_is_the_actual_processed_image(self):
         source = Path(os.environ.get("SEENAV_TEST_SOURCE", reproduce.DEFAULT_SOURCE))
         py = source / "verl-agent/agent_system/multi_turn_rollout/utils.py"
